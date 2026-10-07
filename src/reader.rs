@@ -233,11 +233,12 @@ struct Fx(u64);
 impl std::hash::Hasher for Fx {
     fn write(&mut self, bytes: &[u8]) {
         let mut h = self.0;
-        let mut chunks = bytes.chunks_exact(8);
-        for c in &mut chunks {
-            h = (h.rotate_left(5) ^ u64::from_le_bytes(c.try_into().unwrap())).wrapping_mul(0x517cc1b727220a95);
+        let mut rest = bytes;
+        while let Some((c, r)) = rest.split_first_chunk::<8>() {
+            h = (h.rotate_left(5) ^ u64::from_le_bytes(*c)).wrapping_mul(0x517cc1b727220a95);
+            rest = r;
         }
-        for &b in chunks.remainder() {
+        for &b in rest {
             h = (h.rotate_left(5) ^ b as u64).wrapping_mul(0x517cc1b727220a95);
         }
         self.0 = h;
