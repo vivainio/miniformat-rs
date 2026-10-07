@@ -1,8 +1,16 @@
 # miniformat-rs
 
-Minimal, fast Rust port of [miniformat](../miniformat): a strict config format with
-YAML syntax where every scalar is a string and `#+include` splices in files.
-Zero runtime dependencies; same fixtures (`tests/cases`) as the Python original.
+Minimal, fast Rust port of [miniformat](https://github.com/vivainio/miniformat): a strict config
+format with YAML syntax where every scalar is a string, `#+include` splices in files, and
+`key: !Name value` loads as `{"!Name": value}`.
+
+**The format is defined by the Python original**: see its
+[README](https://github.com/vivainio/miniformat#the-format) for the syntax, the rules, `#+include`
+and tags. This crate follows it and runs the same fixture suite (`tests/cases`, synced from
+the original), so the two should agree on every input. If they differ, the Python
+implementation is the reference and this is a bug.
+
+Zero runtime dependencies (serde support is an optional feature).
 
 ```rust
 // tree of owned strings
