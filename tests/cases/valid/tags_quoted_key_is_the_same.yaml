@@ -1,0 +1,3 @@
+a:
+  "!Ref": x
+b: !Ref x

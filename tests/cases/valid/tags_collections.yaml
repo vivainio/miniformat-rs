@@ -1,0 +1,14 @@
+a: !If
+  - cond
+  - x
+  - !Ref y
+b: !Merge
+  k: v
+  n: !Ref z
+list:
+  - !Ref a
+  - !Sub "q: r"
+  - !Sub |
+    t
+  - !If
+    - c

@@ -250,7 +250,41 @@ impl std::hash::Hasher for Fx {
     }
 }
 
+/// Events worked out ahead of the step that delivers them (at most four).
+struct Queue<'a> {
+    buf: [Option<Event<'a>>; 4],
+    head: usize,
+    len: usize,
+}
+
+impl<'a> Queue<'a> {
+    fn new() -> Self {
+        Queue {
+            buf: [None, None, None, None],
+            head: 0,
+            len: 0,
+        }
+    }
+    #[inline]
+    fn push(&mut self, e: Event<'a>) {
+        self.buf[(self.head + self.len) & 3] = Some(e);
+        self.len += 1;
+    }
+    #[inline]
+    fn pop(&mut self) -> Option<Event<'a>> {
+        if self.len == 0 {
+            return None;
+        }
+        let e = self.buf[self.head].take();
+        self.head = (self.head + 1) & 3;
+        self.len -= 1;
+        e
+    }
+}
+
 struct Frame<'a> {
+    /// A tag's one-key map: ends as soon as its value is done.
+    tag: bool,
     list: bool,
     ind: usize,
     ks: usize,
@@ -283,7 +317,7 @@ pub struct Reader<'a> {
     strict: bool,
     state: St,
     /// Events already worked out, delivered before the next step.
-    queue: [Option<Event<'a>>; 2],
+    queue: Queue<'a>,
 }
 
 // -- small helpers ---------------------------------------------------------
@@ -353,7 +387,7 @@ fn hint(c: u8) -> Option<&'static str> {
         b'[' | b'{' => "flow syntax is not supported (only [] and {})",
         b'&' => "anchors are not supported",
         b'*' => "aliases are not supported",
-        b'!' => "tags are not supported",
+        b'!' => "a tag is !Name, a space, then the value (no !!, none on keys)",
         b'>' => "folded scalars are not supported; use '|'",
         b'\'' => "single quotes are not supported; use double quotes",
         b'%' => "directives are not supported",
@@ -371,6 +405,20 @@ const BAD_START: [bool; 256] = {
     }
     t
 };
+
+/// Length of the tag at the start of `s` (`!Name`, then a space or the end), if any.
+pub(crate) fn tag_len(s: &str) -> Option<usize> {
+    let b = s.as_bytes();
+    if b.len() < 2 || b[0] != b'!' || !b[1].is_ascii_alphabetic() {
+        return None;
+    }
+    let mut n = 2;
+    while n < b.len() && (b[n].is_ascii_alphanumeric() || matches!(b[n], b'_' | b'.' | b':' | b'-')) {
+        n += 1;
+    }
+    let ends_ok = b[n - 1].is_ascii_alphanumeric() || b[n - 1] == b'_';
+    (ends_ok && (n == b.len() || b[n] == b' ')).then_some(n)
+}
 
 fn is_list_item(c: &str) -> bool {
     c == "-" || c.starts_with("- ")
@@ -554,7 +602,7 @@ impl<'a> Reader<'a> {
             keys: Vec::new(),
             strict: true,
             state: St::Init,
-            queue: [None, None],
+            queue: Queue::new(),
         })
     }
 
@@ -826,16 +874,19 @@ impl<'a> Reader<'a> {
     // -- events ----------------------------------------------------------------
 
     fn step(&mut self) -> R<Option<Event<'a>>> {
-        if let Some(e) = self.queue[0].take() {
-            if self.queue[1].is_some() {
-                self.queue[0] = self.queue[1].take();
-            }
+        if let Some(e) = self.queue.pop() {
             return Ok(Some(e));
         }
         match self.state {
             St::Frame => {
                 let (list, ind) = {
                     let f = self.stack.last().unwrap();
+                    if f.tag {
+                        // its value is complete: close the tag's map
+                        let f = self.stack.pop().unwrap();
+                        self.keys.truncate(f.ks);
+                        return Ok(Some(Event::MapEnd));
+                    }
                     (f.list, f.ind)
                 };
                 if !self.skip()? || self.cur.as_ref().unwrap().indent < ind {
@@ -874,6 +925,7 @@ impl<'a> Reader<'a> {
 
     fn push_frame(&mut self, list: bool, ind: usize) {
         self.stack.push(Frame {
+            tag: false,
             list,
             ind,
             ks: self.keys.len(),
@@ -909,7 +961,7 @@ impl<'a> Reader<'a> {
         if c == "{}" || c == "[]" {
             let map = c == "{}";
             self.cur = None;
-            self.queue[0] = Some(if map { Event::MapEnd } else { Event::ListEnd });
+            self.queue.push(if map { Event::MapEnd } else { Event::ListEnd });
             self.state = St::RootEnd;
             return Ok(if map { Event::MapStart } else { Event::ListStart });
         }
@@ -973,8 +1025,7 @@ impl<'a> Reader<'a> {
             Some((key, off)) => {
                 let key = self.piece(src, key);
                 self.add_key(&key)?;
-                let v = self.value(off, ind as isize)?;
-                self.queue[0] = Some(v);
+                self.value(off, ind as isize)?;
                 Ok(Event::Key(key))
             }
             None => {
@@ -993,7 +1044,8 @@ impl<'a> Reader<'a> {
         let cur = self.cur.unwrap();
         let content = self.content(&cur);
         if content == "-" {
-            return self.value(1, ind as isize);
+            self.value(1, ind as isize)?;
+            return Ok(self.queue.pop().unwrap());
         }
         let Some(rest) = content.strip_prefix("- ") else {
             return Err(self.err("expected '- ' list item"));
@@ -1001,7 +1053,7 @@ impl<'a> Reader<'a> {
         if rest.starts_with(' ') && !is_blank(rest.ltrim_sp()) {
             return Err(self.err("exactly one space is allowed after '-'"));
         }
-        if !is_blank(rest) && !rest.starts_with('|') {
+        if !is_blank(rest) && !rest.starts_with(['|', '!']) {
             if let Some((key, off)) = self.split_entry(rest, cur.start + 2, &cur.scan, 2)? {
                 // '- key: v': treat the line as a map line indented under the dash
                 let key = self.piece(cur.src, key);
@@ -1020,35 +1072,57 @@ impl<'a> Reader<'a> {
                 }
                 self.push_frame(false, ind + 2);
                 self.add_key(&key)?;
-                let v = self.value(off, (ind + 2) as isize)?;
-                self.queue = [Some(Event::Key(key)), Some(v)];
+                self.queue.push(Event::Key(key));
+                self.value(off, (ind + 2) as isize)?;
                 return Ok(Event::MapStart);
             }
         }
-        self.value(2, ind as isize)
+        self.value(2, ind as isize)?;
+        Ok(self.queue.pop().unwrap())
     }
 
-    /// The value after 'key:' or '-' on the current line.
-    fn value(&mut self, off: usize, parent: isize) -> R<Event<'a>> {
+    /// The value after 'key:' or '-' on the current line; pushes its events.
+    fn value(&mut self, off: usize, parent: isize) -> R<()> {
         let cur = self.cur.as_ref().unwrap();
         let (src, start) = (cur.src, cur.start);
         let content = &text_of(self.main, &self.srcs, src)[start..cur.end];
         let raw = &content[off..];
         let lead = raw.len() - raw.ltrim_sp().len();
         let rest = raw[lead..].rtrim_sp();
+        let rs = off + lead;
         self.state = St::Frame;
         if rest.is_empty() || rest.starts_with('#') {
             self.cur = None;
-            return Ok(self.block(parent)?.unwrap_or(Event::Scalar(Cow::Borrowed(""))));
+            let ev = self.block(parent)?.unwrap_or(Event::Scalar(Cow::Borrowed("")));
+            self.queue.push(ev);
+            return Ok(());
         }
         if rest.starts_with('|') {
             if split_comment(rest).rtrim_sp() != "|" {
                 return Err(self.err("only a plain '|' block scalar header is supported"));
             }
             self.cur = None;
-            return self.block_scalar(parent).map(|s| Event::Scalar(Cow::Owned(s)));
+            let s = self.block_scalar(parent)?;
+            self.queue.push(Event::Scalar(Cow::Owned(s)));
+            return Ok(());
         }
-        let rs = off + lead;
+        if let Some(tl) = tag_len(rest) {
+            // '!Name value' is the one-key map {"!Name": value}
+            if tag_len(rest[tl..].ltrim_sp()).is_some() {
+                return Err(self.err("a value can have only one tag"));
+            }
+            let tag = self.cow(src, start + rs, start + rs + tl);
+            self.stack.push(Frame {
+                tag: true,
+                list: false,
+                ind: 0,
+                ks: self.keys.len(),
+                set: None,
+            });
+            self.queue.push(Event::MapStart);
+            self.queue.push(Event::Key(tag));
+            return self.value(rs + tl, parent);
+        }
         let ev = match self.inline(content, &cur.scan, rs, rs + rest.len(), start)? {
             Inl::Scalar(p) => Event::Scalar(self.piece(src, p)),
             Inl::Map => {
@@ -1061,7 +1135,8 @@ impl<'a> Reader<'a> {
             }
         };
         self.cur = None;
-        Ok(ev)
+        self.queue.push(ev);
+        Ok(())
     }
 
     /// A value on one line: `content[rs..re]` is the trimmed text after the
@@ -1232,7 +1307,7 @@ impl<'a> Iterator for Reader<'a> {
             Ok(ev) => ev.map(Ok),
             Err(e) => {
                 self.state = St::End;
-                self.queue = [None, None];
+                self.queue = Queue::new();
                 Some(Err(e))
             }
         }

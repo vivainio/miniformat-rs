@@ -1,5 +1,6 @@
 //! Canonical writer and JSON output.
 
+use crate::reader::tag_len;
 use crate::{bad_char, Value};
 use std::fmt::Write;
 
@@ -83,7 +84,28 @@ fn pad(out: &mut String, n: usize) {
 }
 
 /// The head ('key:' or '-') is already written; write the value after it.
+/// A one-key map whose key is a tag name is written as a tag (`!Name inner`).
+fn tag_of<S: AsRef<str>>(v: &Value<S>) -> Option<(&str, &Value<S>)> {
+    match v {
+        Value::Map(m) if m.len() == 1 => {
+            let k = m[0].0.as_ref();
+            (tag_len(k) == Some(k.len())).then_some((k, &m[0].1))
+        }
+        _ => None,
+    }
+}
+
 fn value<S: AsRef<str>>(out: &mut String, ind: usize, v: &Value<S>) {
+    value_in(out, ind, v, true)
+}
+
+/// A tag holds one value, so under a tag (`tagged` false) a tag-shaped map is written as a plain map.
+fn value_in<S: AsRef<str>>(out: &mut String, ind: usize, v: &Value<S>, tagged: bool) {
+    if let Some((tag, inner)) = tag_of(v).filter(|_| tagged) {
+        out.push(' ');
+        out.push_str(tag);
+        return value_in(out, ind, inner, false);
+    }
     match v {
         Value::Str(s) if block_ok(s.as_ref()) => {
             out.push_str(" |\n");
@@ -132,7 +154,7 @@ fn map<S: AsRef<str>>(out: &mut String, ind: usize, m: &[(S, Value<S>)], dash: b
 fn list<S: AsRef<str>>(out: &mut String, ind: usize, l: &[Value<S>]) {
     for v in l {
         match v {
-            Value::Map(m) if !m.is_empty() => map(out, ind + 2, m, true),
+            Value::Map(m) if !m.is_empty() && tag_of(v).is_none() => map(out, ind + 2, m, true),
             _ => {
                 pad(out, ind);
                 out.push('-');

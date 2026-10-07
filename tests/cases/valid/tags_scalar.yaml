@@ -1,0 +1,7 @@
+a: !Ref MyQueue
+b: !Sub "x: ${A}"
+c: !GetAtt Q.Arn
+d: !Ref # a comment
+e: !Fn::Sub x
+f: !x {}
+g: !y []

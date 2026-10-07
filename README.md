@@ -55,6 +55,12 @@ for them (`port: 5432` into `u16`, `true`/`false` into `bool`); `key:` (empty) i
 `Reader::strict_keys(false)` skips duplicate-key detection (on by default).
 `Reader::skip_value()` consumes the value after a `Key`.
 
+Tags (as in the Python original): `key: !Name value` is the one-key map `{"!Name": value}`, so
+`queue: !Ref MyQueue` reads as `queue` -> `{"!Ref": "MyQueue"}`. In events that is
+`MapStart, Key("!Ref"), Scalar("MyQueue"), MapEnd`; in lookups the tag is a path segment
+(`queue.!Ref`); `dumps` writes such maps back as tags. One tag per value, none on keys or the
+root, no `!!`.
+
 CLI: `miniformat FILE` prints JSON, `miniformat --fmt FILE` prints canonical text,
 `miniformat --get db.port FILE` prints one scalar (streaming).
 

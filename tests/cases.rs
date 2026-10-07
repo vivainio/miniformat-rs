@@ -183,3 +183,22 @@ fn lookup_stops_early() {
     );
     assert!(miniformat::get("a: 1\nb: [oops\n", None, "b").is_err());
 }
+
+#[test]
+fn tags_are_one_key_maps() {
+    let ev = events("a: !Ref x\nb: !Sub |\n  t\nc: !If\n  - !Ref y\nd: !Fn::Join {}\ne: !Ref\n");
+    assert_eq!(
+        ev.join(" "),
+        r#"{ a: { !Ref: ="x" } b: { !Sub: ="t\n" } c: { !If: [ { !Ref: ="y" } ] } d: { !Fn::Join: { } } e: { !Ref: ="" } }"#
+    );
+}
+
+#[test]
+fn tags_in_lookups_and_dumps() {
+    use miniformat::{dumps, get};
+    let doc = "queue: !Ref MyQueue\nlist:\n  - !GetAtt Q.Arn\n  - k: v\n";
+    assert_eq!(get(doc, None, "queue.!Ref").unwrap().as_deref(), Some("MyQueue"));
+    assert_eq!(get(doc, None, "list.0.!GetAtt").unwrap().as_deref(), Some("Q.Arn"));
+    // the dumper writes a tag-shaped map as a tag
+    assert_eq!(dumps(&loads(doc, None).unwrap()), doc);
+}
