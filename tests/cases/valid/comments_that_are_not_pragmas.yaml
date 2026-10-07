@@ -1,0 +1,10 @@
+#include x.yaml
+# include x.yaml
+# +include x.yaml
+#+ include x.yaml
+#+
+#+ text
+#TODO
+#!shebang
+a: 1 #+include x.yaml
+b: 2

@@ -1,0 +1,29 @@
+[package]
+name = "miniformat"
+version = "0.1.0"
+edition = "2021"
+description = "A tiny, strict config format with YAML syntax (fast Rust port)"
+license = "MIT"
+repository = "https://github.com/vivainio/miniformat-rs"
+readme = "README.md"
+keywords = ["config", "yaml", "parser", "serde"]
+categories = ["parser-implementations", "config"]
+exclude = [".github"]
+
+[features]
+default = []
+serde = ["dep:serde"]
+
+[dependencies]
+serde = { version = "1", optional = true, default-features = false, features = ["std"] }
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

@@ -1,0 +1,6 @@
+- name: a
+  tags:
+    - x
+    - y
+  after: z
+- b

@@ -1,0 +1,7 @@
+# top
+a: 1 # trailing
+# between
+b: 2
+  # indented comment
+c:   # on a parent
+  d: 3
