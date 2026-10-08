@@ -10,6 +10,9 @@ and tags. This crate follows it and runs the same fixture suite (`tests/cases`, 
 the original), so the two should agree on every input. If they differ, the Python
 implementation is the reference and this is a bug.
 
+One rule trips people up: **flow syntax other than empty `{}` and `[]` is not valid**, tags included.
+`branches: [ main ]` and `!Join [a, b]` are errors; write them as block lists.
+
 Zero runtime dependencies (serde support and the command line are optional features).
 
 ```rust
@@ -117,6 +120,9 @@ invalid, so it fits CI and pre-commit hooks. `-q` prints nothing at all (exit st
 | `<<: *base` | merged (keys of the map win) |
 | `!Ref x` | kept: `{"!Ref": "x"}` |
 | `!!str 5` | `5`, with a warning (`!!` tags are dropped) |
+
+Flow syntax other than empty `{}` and `[]` is not valid miniformat, even after a tag
+(`!Join [a, b]`), so it always comes out in block form, which is what `--from-yaml` writes.
 
 Refused with a line number: multiple documents, duplicate keys, mappings or sequences as keys,
 tags other than `!Name`. **Comments are not carried over.**
