@@ -112,6 +112,10 @@ miniformat --from-yaml -i FILE...    rewrite YAML files as miniformat, in place
 Refused with a line number: multiple documents, duplicate keys, mappings or sequences as keys,
 tags other than `!Name`. **Comments are not carried over.**
 
+A plain `<<` key is YAML's merge key here, so it must hold a mapping (or a list of mappings),
+otherwise it is an error. (Quote it, `"<<"`, for an ordinary key. miniformat itself treats `<<` as an
+ordinary key, so files that are already valid miniformat are never converted.)
+
 `-i` rewrites each file (via a temp file and a rename) and keeps going if one fails, exiting 1 at the
 end. It will not lose data silently:
 
