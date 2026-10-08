@@ -20,6 +20,7 @@ Zero runtime dependencies (serde support and the command line are optional featu
 let cfg = miniformat::load("app.yaml")?;          // or loads(text, Some(base_dir))
 cfg.get("db").and_then(|d| d.get("port"));        // Some(Value::Str("5432"))
 let text = miniformat::dumps(&cfg);               // canonical form
+let flat = miniformat::flatten(&text, Some(dir))?; // same, #+include expanded
 
 // tree that borrows from the input where it can
 let cfg = miniformat::loads_borrowed(&text, None)?;

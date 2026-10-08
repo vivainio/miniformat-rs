@@ -150,6 +150,12 @@ fn build<'a, S: From<Cow<'a, str>>>(text: &'a str, base: Option<&Path>) -> R<Val
     Ok(root.expect("the reader yields a root"))
 }
 
+/// `text` with every `#+include` expanded (relative to `base`), as canonical
+/// text that needs no other files. Comments are dropped.
+pub fn flatten(text: &str, base: Option<&Path>) -> R<String> {
+    Ok(dumps(&loads(text, base)?))
+}
+
 /// Read and parse a file; includes are relative to its directory.
 pub fn load(path: impl AsRef<Path>) -> Result<Value, Error> {
     let path = path.as_ref();

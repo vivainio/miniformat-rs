@@ -243,3 +243,13 @@ fn from_json_scalars_and_errors() {
     let e = miniformat::from_json("{\"a\":\n tru}").unwrap_err();
     assert_eq!(e.line(), Some(2));
 }
+
+#[test]
+fn flatten_expands_includes() {
+    let dir = std::env::temp_dir().join(format!("mf-flat-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("b.yaml"), "y: 2\n").unwrap();
+    let flat = miniformat::flatten("x: 1\n#+include b.yaml\n", Some(&dir)).unwrap();
+    assert_eq!(flat, "x: 1\ny: 2\n");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
