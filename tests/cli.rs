@@ -217,3 +217,64 @@ fn check_validates_files() {
         "-q is for --check"
     );
 }
+
+/// Every shared valid fixture, converted from YAML, must give the expected tree.
+#[test]
+fn from_yaml_agrees_with_every_fixture() {
+    let dir = std::path::Path::new("tests/cases/valid");
+    let mut checked = 0;
+    for e in std::fs::read_dir(dir).unwrap() {
+        let p = e.unwrap().path();
+        if p.extension().is_none_or(|x| x != "yaml") {
+            continue;
+        }
+        let name = p.file_stem().unwrap().to_string_lossy().into_owned();
+        let out = bin().arg("--from-yaml").arg(&p).output().unwrap();
+        if !out.status.success() {
+            let err = stderr(&out);
+            assert!(err.contains("pragma"), "{name}: {err}");
+            continue; // fixtures with #+ pragmas are refused by design
+        }
+        let got: serde_json::Value = serde_json::from_str(&miniformat::to_json(
+            &miniformat::loads(&stdout(&out), None).unwrap_or_else(|e| panic!("{name}: output does not load: {e}")),
+        ))
+        .unwrap();
+        let want: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(p.with_extension("json")).unwrap()).unwrap();
+        assert_eq!(got, want, "{name}");
+        checked += 1;
+    }
+    assert!(checked > 50, "only {checked} fixtures checked");
+}
+
+fn yaml_value(input: &str, path: &str) -> String {
+    let mut child = bin()
+        .arg("--from-yaml")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(input.as_bytes()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "{input:?}: {}", stderr(&out));
+    let text = stdout(&out);
+    miniformat::get(&text, None, path)
+        .unwrap()
+        .unwrap_or_else(|| panic!("{input:?} -> {text:?}"))
+        .into_owned()
+}
+
+#[test]
+fn from_yaml_block_scalars_at_end_of_file_keep_yaml_newlines() {
+    // no final newline in the file: the block has none either (as in YAML)
+    assert_eq!(yaml_value("a: |\n  x\n  y", "a"), "x\ny");
+    assert_eq!(yaml_value("a: |\n  x\n  y\n", "a"), "x\ny\n");
+    assert_eq!(yaml_value("l:\n  - |\n    x", "l.0"), "x");
+    // not at the end: the clip newline stays, with or without a trailing comment
+    assert_eq!(yaml_value("a: |\n  x\nb: 1", "a"), "x\n");
+    assert_eq!(yaml_value("a: |\n  x\n# done", "a"), "x\n");
+    assert_eq!(yaml_value("a: >\n  x\n  y", "a"), "x y");
+    // a leading BOM is not part of the first key
+    assert_eq!(yaml_value("\u{feff}a: 1\n", "a"), "1");
+}

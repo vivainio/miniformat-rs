@@ -61,12 +61,31 @@ struct State {
 }
 
 pub fn convert(text: &str) -> R<Converted> {
+    // a BOM is an encoding mark, not part of the first key
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    // The parser clips a final `|` block to one newline even when the file has
+    // none (YAML, and the miniformat loader, keep it without). Give it a line
+    // end, then take that newline off any block scalar that runs to the very end.
+    let appended = !text.is_empty() && !text.ends_with('\n');
+    let text = if appended {
+        std::borrow::Cow::Owned(format!("{text}\n"))
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    };
+    let end = text.chars().count();
     let mut st = State::default();
-    for item in Parser::new_from_str(text) {
-        let (ev, span) = item.map_err(|e| ConvError {
+    for item in Parser::new_from_str(&text) {
+        let (mut ev, span) = item.map_err(|e| ConvError {
             line: Some(e.marker().line()),
             msg: e.info().to_string(),
         })?;
+        if let Event::Scalar(v, ScalarStyle::Literal | ScalarStyle::Folded, ..) = &mut ev {
+            if appended && span.end.index() >= end && v.ends_with('\n') {
+                let mut s = std::mem::take(v).into_owned();
+                s.pop();
+                *v = s.into();
+            }
+        }
         st.event(ev, span.start.line())?;
     }
     match st.root {
