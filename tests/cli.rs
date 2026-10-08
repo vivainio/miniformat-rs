@@ -164,3 +164,56 @@ fn json_and_usage() {
     assert_eq!(bin().arg("-i").output().unwrap().status.code(), Some(2)); // -i needs --from-yaml
     assert_eq!(bin().output().unwrap().status.code(), Some(2));
 }
+
+#[test]
+fn check_validates_files() {
+    let d = temp("check");
+    let ok = d.join("ok.yaml");
+    std::fs::write(&ok, "a:\n  - 1\n  - k: v\n").unwrap();
+    let dup = d.join("dup.yaml");
+    std::fs::write(&dup, "a: 1\nb: 2\na: 3\n").unwrap();
+    let inc = d.join("inc.yaml");
+    std::fs::write(&inc, "x:\n  #+include part.yaml\n").unwrap();
+    std::fs::write(d.join("part.yaml"), "y: 'single'\n").unwrap();
+    let missing = d.join("nope.yaml");
+
+    let out = bin().arg("--check").arg(&ok).output().unwrap();
+    assert!(
+        out.status.success() && out.stdout.is_empty() && out.stderr.is_empty(),
+        "silent when valid"
+    );
+
+    let out = bin().arg("--check").args([&ok, &dup, &inc, &missing]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err = stderr(&out);
+    assert!(err.contains("dup.yaml: line 3: duplicate key"), "{err}");
+    assert!(
+        err.contains("part.yaml: line 1") && err.contains("single quotes"),
+        "an include reports its own file: {err}"
+    );
+    assert!(err.contains("nope.yaml"), "{err}");
+    assert!(!err.contains("ok.yaml"), "{err}");
+
+    let out = bin().args(["--check", "-q"]).args([&ok, &dup]).output().unwrap();
+    assert!(out.status.code() == Some(1) && out.stdout.is_empty() && out.stderr.is_empty());
+
+    let out = bin()
+        .args(["--check", "--list"])
+        .args([&ok, &dup, &inc])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(stdout(&out), format!("{}\n{}\n", dup.display(), inc.display()));
+    assert!(out.stderr.is_empty());
+
+    assert_eq!(
+        bin().arg("--check").output().unwrap().status.code(),
+        Some(2),
+        "needs files"
+    );
+    assert_eq!(
+        bin().arg("-q").arg(&ok).output().unwrap().status.code(),
+        Some(2),
+        "-q is for --check"
+    );
+}

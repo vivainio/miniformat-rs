@@ -5,6 +5,8 @@ use std::path::Path;
 use std::process::ExitCode;
 
 const USAGE: &str = "usage: miniformat [--fmt] FILE         print JSON, or the canonical text with --fmt
+       miniformat --check [-q|--list] FILE...   validate files; quiet when valid, exit 1 if any is not
+                                      (-q: no output at all, --list: print only the invalid names)
        miniformat --get PATH FILE     print the scalar at a dotted path (db.port); streams, no tree
        miniformat --from-json [FILE]  JSON (FILE or stdin) to miniformat on stdout
        miniformat --from-yaml [FILE]  YAML (FILE or stdin) to miniformat on stdout
@@ -19,6 +21,9 @@ struct Opts {
     from_yaml: bool,
     in_place: bool,
     force: bool,
+    check: bool,
+    quiet: bool,
+    list: bool,
     files: Vec<String>,
 }
 
@@ -32,6 +37,9 @@ fn main() -> ExitCode {
             "--from-yaml" => o.from_yaml = true,
             "-i" | "--in-place" => o.in_place = true,
             "--force" => o.force = true,
+            "--check" => o.check = true,
+            "-q" | "--quiet" => o.quiet = true,
+            "--list" => o.list = true,
             "--get" => match args.next() {
                 Some(p) => o.get = Some(p),
                 None => return usage(),
@@ -39,8 +47,11 @@ fn main() -> ExitCode {
             _ => o.files.push(a),
         }
     }
-    if (o.in_place || o.force) && !o.from_yaml {
+    if (o.in_place || o.force) && !o.from_yaml || (o.quiet || o.list) && !o.check {
         return usage();
+    }
+    if o.check {
+        return check(&o);
     }
     if o.from_yaml {
         return from_yaml(&o);
@@ -77,6 +88,40 @@ fn main() -> ExitCode {
     };
     let _ = std::io::stdout().lock().write_all(out.as_bytes());
     ExitCode::SUCCESS
+}
+
+/// `--check`: parse every file completely (includes too) and report the invalid ones.
+fn check(o: &Opts) -> ExitCode {
+    if o.files.is_empty() || o.files.iter().any(|f| f.starts_with('-')) {
+        return usage();
+    }
+    let mut bad = false;
+    for f in &o.files {
+        if let Err(msg) = check_file(f) {
+            bad = true;
+            if o.list {
+                println!("{f}");
+            } else if !o.quiet {
+                eprintln!("{msg}");
+            }
+        }
+    }
+    ExitCode::from(bad as u8)
+}
+
+fn check_file(file: &str) -> Result<(), String> {
+    let text = read(Some(file))?;
+    let base = std::path::absolute(file).ok();
+    let reader = miniformat::Reader::new(&text, base.as_deref().and_then(Path::parent));
+    // events only: nothing is built, but all of it is read, duplicate keys included
+    let r = reader.and_then(|r| r.into_iter().try_for_each(|ev| ev.map(drop)));
+    r.map_err(|e| {
+        if e.file().is_some() || e.line().is_none() {
+            e.to_string()
+        } else {
+            format!("{file}: {e}")
+        }
+    })
 }
 
 fn usage() -> ExitCode {

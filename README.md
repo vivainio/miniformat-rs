@@ -88,11 +88,20 @@ download a binary from the releases page.
 ```
 miniformat FILE                  print JSON
 miniformat --fmt FILE            print the canonical text
+miniformat --check FILE...       validate files (silent if valid, exit 1 if any is not)
 miniformat --get db.port FILE    print one scalar (streams, no tree)
 miniformat --from-json [FILE]    JSON (FILE or stdin) to miniformat on stdout
 miniformat --from-yaml [FILE]    YAML (FILE or stdin) to miniformat on stdout
 miniformat --from-yaml -i FILE...    rewrite YAML files as miniformat, in place
 ```
+
+### Checking files
+
+`miniformat --check FILE...` parses each file completely, `#+include` files and duplicate keys
+included, without building a tree. It prints nothing for valid files, `FILE: line N: message` on
+stderr for invalid ones (an error inside an include names the include), and exits 1 if any file is
+invalid, so it fits CI and pre-commit hooks. `-q` prints nothing at all (exit status only);
+`--list` prints just the names of the invalid files on stdout.
 
 ### Converting existing YAML
 
