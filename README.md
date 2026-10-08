@@ -69,8 +69,30 @@ Tags (as in the Python original): `key: !Name value` is the one-key map `{"!Name
 (`queue.!Ref`); `dumps` writes such maps back as tags. One tag per value, none on keys or the
 root, no `!!`.
 
+JSON in (`miniformat::from_json(text)`, or the CLI below): every scalar becomes a string, numbers keep
+the text they were written with (`1.10` stays `1.10`), `true`/`false` become `"true"`/`"false"`,
+`null` becomes the empty value. Duplicate keys and a non-object/array root are errors.
+
 CLI: `miniformat FILE` prints JSON, `miniformat --fmt FILE` prints canonical text,
-`miniformat --get db.port FILE` prints one scalar (streaming).
+`miniformat --get db.port FILE` prints one scalar (streaming),
+`miniformat --from-json [FILE]` reads JSON (FILE or stdin) and prints miniformat.
 
 `cargo test` runs the shared fixtures plus reader/include tests.
 `cargo run --release --example bench -- FILE` times each API in-process.
+
+## Converting existing YAML
+
+There is no YAML parser here (that would break "zero dependencies"); convert through JSON with
+whatever you already have. The one thing to get right is that the YAML-to-JSON step must **not
+type scalars**, otherwise `no` is already `false` and `1.10` already `1.1` before miniformat
+sees them. With PyYAML, load plain scalars as strings:
+
+```
+python3 -c 'import yaml,json,sys
+class L(yaml.SafeLoader): pass
+L.yaml_implicit_resolvers = {}
+print(json.dumps(yaml.load(sys.stdin, L)))' < app.yaml | miniformat --from-json > app.mini.yaml
+```
+
+A typed converter such as `yq -o=json` also works when you do want the typed values written out
+as strings (`true`, `1.1`). Comments, anchors and tags are not carried over by either route.

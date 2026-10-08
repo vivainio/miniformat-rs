@@ -425,7 +425,7 @@ fn is_list_item(c: &str) -> bool {
 }
 
 /// Length of the double-quoted token at the start of `s`, if terminated.
-fn quoted_len(s: &str) -> Option<usize> {
+pub(crate) fn quoted_len(s: &str) -> Option<usize> {
     let b = s.as_bytes();
     let mut k = 1;
     while k < b.len() {
@@ -439,7 +439,7 @@ fn quoted_len(s: &str) -> Option<usize> {
 }
 
 /// Unescape a quoted token; `Ok(None)` means the inside is used as is.
-fn unquote(token: &str) -> Result<Option<String>, String> {
+pub(crate) fn unquote(token: &str) -> Result<Option<String>, String> {
     let inner = &token[1..token.len() - 1];
     if !inner.contains('\\') {
         return match inner.chars().find(|&c| c < ' ') {

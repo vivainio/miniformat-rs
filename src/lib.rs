@@ -5,6 +5,7 @@
 
 mod dump;
 mod glob;
+mod json;
 mod query;
 mod reader;
 #[cfg(feature = "serde")]
@@ -15,6 +16,7 @@ use std::fmt;
 use std::path::Path;
 
 pub use dump::{dumps, to_json};
+pub use json::from_json;
 pub use query::{find, get, get_as, keys, len, Found};
 pub use reader::{Event, Reader};
 #[cfg(feature = "serde")]

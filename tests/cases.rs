@@ -202,3 +202,44 @@ fn tags_in_lookups_and_dumps() {
     // the dumper writes a tag-shaped map as a tag
     assert_eq!(dumps(&loads(doc, None).unwrap()), doc);
 }
+
+#[test]
+fn json_round_trips_every_fixture() {
+    for n in names("valid") {
+        let dir = Path::new("tests/cases/valid");
+        let Ok(text) = fs::read_to_string(dir.join(format!("{n}.yaml"))) else {
+            continue;
+        };
+        let v = loads(&text, Some(dir)).unwrap();
+        let back = miniformat::from_json(&to_json(&v)).unwrap_or_else(|e| panic!("{n}: {e}"));
+        assert_eq!(back, v, "{n}");
+        assert_eq!(loads(&dumps(&back), None).unwrap(), v, "{n}: via miniformat text");
+    }
+}
+
+#[test]
+fn from_json_scalars_and_errors() {
+    let v = miniformat::from_json(
+        r#" {"n": 1.10, "e": -2E+3, "t": true, "f": false, "z": null, "s": "a\u00e9\n", "l": [], "o": {}} "#,
+    )
+    .unwrap();
+    assert_eq!(
+        to_json(&v).replace([' ', '\n'], ""),
+        r#"{"n":"1.10","e":"-2E+3","t":"true","f":"false","z":"","s":"aé\n","l":[],"o":{}}"#
+    );
+    for (bad, needle) in [
+        ("1", "root"),
+        ("{\"a\":1,\"a\":2}", "duplicate key"),
+        ("{\"a\":1,}", "string key"),
+        ("[1,]", "JSON value"),
+        ("[01]", "expected ',' or ']'"),
+        ("{\"a\":\"\\ud800\"}", "lone surrogate"),
+        ("[1] x", "after the document"),
+        ("{\"a\":\n tru}", "JSON value"),
+    ] {
+        let e = miniformat::from_json(bad).unwrap_err();
+        assert!(e.to_string().contains(needle), "{bad:?}: {e}");
+    }
+    let e = miniformat::from_json("{\"a\":\n tru}").unwrap_err();
+    assert_eq!(e.line(), Some(2));
+}
