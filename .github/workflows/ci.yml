@@ -47,7 +47,7 @@ jobs:
     - name: Run tests
       run: cargo test --verbose
 
-    - name: Run tests (all features: serde, cli)
+    - name: Run tests (all features, incl. serde and cli)
       run: cargo test --all-features --verbose
 
     - name: Build release
