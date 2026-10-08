@@ -96,3 +96,14 @@ print(json.dumps(yaml.load(sys.stdin, L)))' < app.yaml | miniformat --from-json 
 
 A typed converter such as `yq -o=json` also works when you do want the typed values written out
 as strings (`true`, `1.1`). Comments, anchors and tags are not carried over by either route.
+
+Single-quoted YAML strings (which miniformat does not allow) come out as plain or double-quoted
+ones, because the YAML parser has already resolved them to the string they mean:
+
+```yaml
+# in                         # out
+plain: 'hello'               plain: hello
+escaped: 'it''s'             escaped: it's
+colon: 'a: b'                colon: "a: b"
+starts_quote: '''q'''        starts_quote: "'q'"
+```
