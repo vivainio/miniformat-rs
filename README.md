@@ -10,7 +10,7 @@ and tags. This crate follows it and runs the same fixture suite (`tests/cases`, 
 the original), so the two should agree on every input. If they differ, the Python
 implementation is the reference and this is a bug.
 
-Zero runtime dependencies (serde support is an optional feature).
+Zero runtime dependencies (serde support and the command line are optional features).
 
 ```rust
 // tree of owned strings
@@ -73,37 +73,53 @@ JSON in (`miniformat::from_json(text)`, or the CLI below): every scalar becomes 
 the text they were written with (`1.10` stays `1.10`), `true`/`false` become `"true"`/`"false"`,
 `null` becomes the empty value. Duplicate keys and a non-object/array root are errors.
 
-CLI: `miniformat FILE` prints JSON, `miniformat --fmt FILE` prints canonical text,
-`miniformat --get db.port FILE` prints one scalar (streaming),
-`miniformat --from-json [FILE]` reads JSON (FILE or stdin) and prints miniformat.
+CLI (optional `cli` feature): JSON, canonical text, `--get`, and YAML/JSON to miniformat; see
+[Command line](#command-line).
 
 `cargo test` runs the shared fixtures plus reader/include tests.
 `cargo run --release --example bench -- FILE` times each API in-process.
 
-## Converting existing YAML
+## Command line
 
-There is no YAML parser here (that would break "zero dependencies"); convert through JSON with
-whatever you already have. The one thing to get right is that the YAML-to-JSON step must **not
-type scalars**, otherwise `no` is already `false` and `1.10` already `1.1` before miniformat
-sees them. With PyYAML, load plain scalars as strings:
+The `miniformat` command is an optional feature, so the library stays dependency-free (the command
+needs a YAML parser, `saphyr-parser`). Install it with `cargo install miniformat --features cli`, or
+download a binary from the releases page.
 
 ```
-python3 -c 'import yaml,json,sys
-class L(yaml.SafeLoader): pass
-L.yaml_implicit_resolvers = {}
-print(json.dumps(yaml.load(sys.stdin, L)))' < app.yaml | miniformat --from-json > app.mini.yaml
+miniformat FILE                  print JSON
+miniformat --fmt FILE            print the canonical text
+miniformat --get db.port FILE    print one scalar (streams, no tree)
+miniformat --from-json [FILE]    JSON (FILE or stdin) to miniformat on stdout
+miniformat --from-yaml [FILE]    YAML (FILE or stdin) to miniformat on stdout
+miniformat --from-yaml -i FILE...    rewrite YAML files as miniformat, in place
 ```
 
-A typed converter such as `yq -o=json` also works when you do want the typed values written out
-as strings (`true`, `1.1`). Comments, anchors and tags are not carried over by either route.
+### Converting existing YAML
 
-Single-quoted YAML strings (which miniformat does not allow) come out as plain or double-quoted
-ones, because the YAML parser has already resolved them to the string they mean:
+`--from-yaml` reads real YAML and writes miniformat. Scalars keep the text they were written with
+(`no`, `1.10`, `007`, `~` stay as they are), so nothing is retyped:
 
-```yaml
-# in                         # out
-plain: 'hello'               plain: hello
-escaped: 'it''s'             escaped: it's
-colon: 'a: b'                colon: "a: b"
-starts_quote: '''q'''        starts_quote: "'q'"
-```
+| YAML | miniformat |
+|---|---|
+| `'hello'`, `'it''s'` | `hello`, `it's` (single quotes are not allowed) |
+| `{x: 1, y: [a, b]}` | block map and list |
+| `text: >` folded block | the folded string, as a `\|` block |
+| `&base` / `*base` | expanded |
+| `<<: *base` | merged (keys of the map win) |
+| `!Ref x` | kept: `{"!Ref": "x"}` |
+| `!!str 5` | `5`, with a warning (`!!` tags are dropped) |
+
+Refused with a line number: multiple documents, duplicate keys, mappings or sequences as keys,
+tags other than `!Name`. **Comments are not carried over.**
+
+`-i` rewrites each file (via a temp file and a rename) and keeps going if one fails, exiting 1 at the
+end. It will not lose data silently:
+
+- A file that is **already valid miniformat** (most plain block YAML is) is left byte-for-byte as it is,
+  comments included, so running it again changes nothing.
+- A file with a `#+` pragma such as `#+include` is refused, since YAML sees those as comments and
+  the conversion would drop them; `--force` converts anyway.
+- The result is read back and compared before anything is written.
+
+Anything else that reads YAML can also feed `--from-json` (`yq -o=json app.yaml | miniformat
+--from-json`), but that route types scalars first (`no` is already `false`), so prefer `--from-yaml`.

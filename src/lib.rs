@@ -17,6 +17,12 @@ use std::path::Path;
 
 pub use dump::{dumps, to_json};
 pub use json::from_json;
+
+/// Is `s` a tag name as miniformat writes them (`!Name`, no `!!`)?
+pub fn is_tag_name(s: &str) -> bool {
+    reader::tag_len(s) == Some(s.len())
+}
+
 pub use query::{find, get, get_as, keys, len, Found};
 pub use reader::{Event, Reader};
 #[cfg(feature = "serde")]

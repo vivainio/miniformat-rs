@@ -47,7 +47,7 @@ jobs:
     - name: Run tests
       run: cargo test --verbose
 
-    - name: Run tests (serde feature)
+    - name: Run tests (all features: serde, cli)
       run: cargo test --all-features --verbose
 
     - name: Build release
@@ -111,7 +111,7 @@ jobs:
         rm Cargo.toml.bak
 
     - name: Build release
-      run: cargo build --release --target ${{ matrix.target }}
+      run: cargo build --release --features cli --target ${{ matrix.target }}
 
     - name: Package binary (Unix)
       if: matrix.os != 'windows-latest'
