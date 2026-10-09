@@ -4,6 +4,7 @@
 //! `loads` / `load` parse, `dumps` writes the canonical form.
 
 mod dump;
+mod flow;
 mod glob;
 mod json;
 mod query;

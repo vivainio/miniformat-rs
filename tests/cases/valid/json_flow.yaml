@@ -1,0 +1,13 @@
+list: ["a", "b"]
+map: {"k": "v", "x y": "z"}
+nested: [{"name": "a", "tags": ["x", "y"]}, {"name": "b", "tags": []}]
+tight: ["a","b"]
+spaced: [ "a" ,  "b" ]
+empty_spaced: [ ]
+quoted: ["a: b", "#c", "d, e", "tab\there", "é", "é", "\/", "\\ud83d"]
+deep: {"a": {"b": [["c"], {"d": "e"}]}}
+items:
+  - ["a", "b"]
+  - {"k": "v"}
+  - ["a: b"]
+  - [{"k": "1"}, {"k": "2"}]

@@ -75,6 +75,15 @@ fn reader_events() {
 }
 
 #[test]
+fn reader_json_flow_events() {
+    let ev = events("a: [\"x\", {\"k\": [\"v\"]}, []]\nb:\n  - {\"p\": \"q\"}\n  - k: [\"z\"]\nc: d\n");
+    assert_eq!(
+        ev.join(" "),
+        r#"{ a: [ ="x" { k: [ ="v" ] } [ ] ] b: [ { p: ="q" } { k: [ ="z" ] } ] c: ="d" }"#
+    );
+}
+
+#[test]
 fn reader_borrows_plain_scalars() {
     use std::borrow::Cow;
     let text = "key: value\nq: \"plain\"\n";

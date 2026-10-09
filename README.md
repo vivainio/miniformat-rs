@@ -10,8 +10,9 @@ and tags. This crate follows it and runs the same fixture suite (`tests/cases`, 
 the original), so the two should agree on every input. If they differ, the Python
 implementation is the reference and this is a bug.
 
-One rule trips people up: **flow syntax other than empty `{}` and `[]` is not valid**, tags included.
-`branches: [ main ]` and `!Join [a, b]` are errors; write them as block lists.
+One rule trips people up: **flow syntax is only valid as one line of JSON whose leaves are all
+strings** (plus empty `{}` and `[]`), and never after a tag. `branches: ["main"]` is fine;
+`branches: [ main ]`, `ports: [80]` and `!Join ["a", "b"]` are errors; write them as block lists.
 
 Zero runtime dependencies (serde support and the command line are optional features).
 
@@ -122,8 +123,8 @@ invalid, so it fits CI and pre-commit hooks. `-q` prints nothing at all (exit st
 | `!Ref x` | kept: `{"!Ref": "x"}` |
 | `!!str 5` | `5`, with a warning (`!!` tags are dropped) |
 
-Flow syntax other than empty `{}` and `[]` is not valid miniformat, even after a tag
-(`!Join [a, b]`), so it always comes out in block form, which is what `--from-yaml` writes.
+Flow collections are only valid miniformat as one line of string-only JSON, and not after a tag
+(`!Join [a, b]`), so `--from-yaml` always writes block form.
 
 Refused with a line number: multiple documents, duplicate keys, mappings or sequences as keys,
 tags other than `!Name`. **Comments are not carried over.**

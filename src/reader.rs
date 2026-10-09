@@ -1,9 +1,9 @@
 //! Pull parser: `Reader` yields `Event`s in document order, borrowing keys and
 //! scalars from the input wherever no unescaping or re-indenting is needed.
 
-use crate::{bad_char, glob, Error};
+use crate::{bad_char, flow, glob, Error};
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
 const MAX_INCLUDES: usize = 1000;
@@ -219,6 +219,8 @@ enum Piece {
 }
 
 enum Inl {
+    /// One line of JSON: its events, the first one included.
+    Flow(Vec<Event<'static>>),
     Scalar(Piece),
     Map,
     List,
@@ -318,6 +320,8 @@ pub struct Reader<'a> {
     state: St,
     /// Events already worked out, delivered before the next step.
     queue: Queue<'a>,
+    /// The rest of a JSON flow value, delivered after the queue.
+    flow: VecDeque<Event<'a>>,
 }
 
 // -- small helpers ---------------------------------------------------------
@@ -384,7 +388,7 @@ fn is_doc_mark(c: &str) -> bool {
 
 fn hint(c: u8) -> Option<&'static str> {
     Some(match c {
-        b'[' | b'{' => "flow syntax is not supported (only [] and {})",
+        b'[' | b'{' => "flow syntax is only supported as a one-line JSON value",
         b'&' => "anchors are not supported",
         b'*' => "aliases are not supported",
         b'!' => "a tag is !Name, a space, then the value (no !!, none on keys)",
@@ -603,6 +607,7 @@ impl<'a> Reader<'a> {
             strict: true,
             state: St::Init,
             queue: Queue::new(),
+            flow: VecDeque::new(),
         })
     }
 
@@ -877,6 +882,9 @@ impl<'a> Reader<'a> {
         if let Some(e) = self.queue.pop() {
             return Ok(Some(e));
         }
+        if let Some(e) = self.flow.pop_front() {
+            return Ok(Some(e));
+        }
         match self.state {
             St::Frame => {
                 let (list, ind) = {
@@ -1053,7 +1061,7 @@ impl<'a> Reader<'a> {
         if rest.starts_with(' ') && !is_blank(rest.ltrim_sp()) {
             return Err(self.err("exactly one space is allowed after '-'"));
         }
-        if !is_blank(rest) && !rest.starts_with(['|', '!']) {
+        if !is_blank(rest) && !rest.starts_with(['|', '!', '[', '{']) {
             if let Some((key, off)) = self.split_entry(rest, cur.start + 2, &cur.scan, 2)? {
                 // '- key: v': treat the line as a map line indented under the dash
                 let key = self.piece(cur.src, key);
@@ -1111,6 +1119,10 @@ impl<'a> Reader<'a> {
             if tag_len(rest[tl..].ltrim_sp()).is_some() {
                 return Err(self.err("a value can have only one tag"));
             }
+            let after = rest[tl..].ltrim_sp();
+            if after.starts_with(['[', '{']) && !matches!(split_comment(after).rtrim_sp(), "{}" | "[]") {
+                return Err(self.err("a tag cannot be followed by a flow collection; put the value on indented lines"));
+            }
             let tag = self.cow(src, start + rs, start + rs + tl);
             self.stack.push(Frame {
                 tag: true,
@@ -1124,6 +1136,12 @@ impl<'a> Reader<'a> {
             return self.value(rs + tl, parent);
         }
         let ev = match self.inline(content, &cur.scan, rs, rs + rest.len(), start)? {
+            Inl::Flow(evs) => {
+                let mut evs = VecDeque::from(evs);
+                let first = evs.pop_front().expect("a flow value has events");
+                self.flow = evs;
+                first
+            }
             Inl::Scalar(p) => Event::Scalar(self.piece(src, p)),
             Inl::Map => {
                 self.state = St::PendEnd { map: true };
@@ -1165,6 +1183,9 @@ impl<'a> Reader<'a> {
         }
         if cut == "[]" {
             return Ok(Inl::List);
+        }
+        if rest.starts_with(['[', '{']) {
+            return flow::parse(rest).map(Inl::Flow).map_err(|m| self.err(m));
         }
         let s = cut.rtrim_sptab();
         self.check_start(s)?;
@@ -1308,6 +1329,7 @@ impl<'a> Iterator for Reader<'a> {
             Err(e) => {
                 self.state = St::End;
                 self.queue = Queue::new();
+                self.flow.clear();
                 Some(Err(e))
             }
         }
