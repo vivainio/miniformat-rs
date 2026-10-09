@@ -121,7 +121,7 @@ fn typed_errors() {
     let e = miniformat::from_str::<Db>("port: eighty\n", None).unwrap_err();
     assert!(e.to_string().contains("invalid u16"), "{e}");
     let e = miniformat::from_str::<Db>("port: 70000\n", None).unwrap_err();
-    assert!(e.to_string().contains("invalid u16"), "{e}");
+    assert!(e.to_string().contains("expected u16"), "{e}");
     let e = miniformat::from_str::<Db>("retries: 1\n", None).unwrap_err();
     assert!(e.to_string().contains("missing field `port`"), "{e}");
     let e = miniformat::from_str::<Config>("debug: yes\n", None).unwrap_err();
@@ -169,4 +169,44 @@ fn generic_values_and_includes() {
 #[test]
 fn trailing_garbage_is_still_an_error() {
     assert!(miniformat::from_str::<BTreeMap<String, String>>("a: 1\n  b: 2\n", None).is_err());
+}
+
+#[test]
+fn typed_scalars_deserialize_by_their_type() {
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct T {
+        i: u16,
+        q: u16,
+        f: f64,
+        g: f64,
+        b: bool,
+        n: Option<String>,
+        e: Option<String>,
+        s: String,
+        v: String,
+    }
+    let t: T = miniformat::from_str(
+        "i: 80\nq: \"81\"\nf: 1.5\ng: 2\nb: true\nn: null\ne:\ns: yes\nv: \"1.10\"\n",
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        t,
+        T {
+            i: 80,
+            q: 81,
+            f: 1.5,
+            g: 2.0,
+            b: true,
+            n: None,
+            e: None,
+            s: "yes".into(),
+            v: "1.10".into()
+        }
+    );
+    // a string field wants a string: quote what looks like a number
+    let e = miniformat::from_str::<Vec<String>>("- 1.10\n", None).unwrap_err();
+    assert!(e.to_string().contains("expected a string"), "{e}");
+    let v: serde_json::Value = miniformat::from_str("a: [1, true, null, \"x\"]\n", None).unwrap();
+    assert_eq!(v.to_string(), r#"{"a":[1,true,null,"x"]}"#);
 }

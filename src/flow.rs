@@ -1,11 +1,11 @@
-//! One line of JSON in which every leaf is a string (`["a", "b"]`,
-//! `{"k": [{"n": "v"}]}`), turned into reader events.
+//! One line of JSON (`["a", 1]`, `{"k": [{"n": true}]}`), turned into reader
+//! events. Numbers and literals are typed as a plain scalar would be.
 //!
 //! Stricter than JSON so that YAML parsers read it the same way: only spaces
-//! between tokens, no surrogate `\u` escapes, no duplicate keys. Nothing may
-//! follow the value, not even a comment.
+//! between tokens, no surrogate `\u` escapes, no duplicate keys, no `NaN` or
+//! `Infinity`. Nothing may follow the value, not even a comment.
 
-use crate::reader::{quoted_len, unquote, Event};
+use crate::reader::{json_number, quoted_len, typed, unquote, Event};
 use std::borrow::Cow;
 use std::collections::HashSet;
 
@@ -44,10 +44,8 @@ pub(crate) fn parse(s: &str) -> Result<Vec<Event<'static>>, String> {
                 }
             }
             Some(b'"') => out.push(Event::Scalar(Cow::Owned(p.string()?))),
-            Some(b'-' | b'0'..=b'9' | b't' | b'f' | b'n' | b'N' | b'I') => {
-                return Err("JSON values must be strings (quote it)".into());
-            }
-            _ => return Err("bad JSON (Expecting value)".into()),
+            Some(_) => out.push(p.bare()?),
+            None => return Err("bad JSON (Expecting value)".into()),
         }
         // a value is complete: close containers, or move on to the next element
         loop {
@@ -93,6 +91,24 @@ impl P<'_> {
         while self.peek() == Some(b' ') {
             self.i += 1;
         }
+    }
+
+    /// A number, `true`, `false` or `null`.
+    fn bare(&mut self) -> Result<Event<'static>, String> {
+        let rest = &self.s[self.i..];
+        let end = rest.find([' ', ',', ']', '}']).unwrap_or(rest.len());
+        let token = &rest[..end];
+        let ev = match typed(token) {
+            Some(ev) => ev,
+            // a JSON number outside what a plain scalar types: it stays a string
+            None if json_number(token).is_some() => Event::Scalar(Cow::Owned(token.to_string())),
+            None if token.contains("NaN") || token.contains("Infinity") => {
+                return Err(format!("{token} is not allowed in a JSON value"));
+            }
+            None => return Err("bad JSON (Expecting value)".into()),
+        };
+        self.i += end;
+        Ok(ev)
     }
 
     /// `"key":` of the map on top of the stack.

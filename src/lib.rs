@@ -1,6 +1,7 @@
 //! miniformat: a tiny, strict config format with YAML syntax.
 //!
-//! Every scalar is a string; `#+include path` splices in other files.
+//! Plain scalars are typed like JSON (`true`, `false`, `null` and numbers; all
+//! else, and anything quoted, is a string); `#+include path` splices in other files.
 //! `loads` / `load` parse, `dumps` writes the canonical form.
 
 mod dump;
@@ -31,9 +32,13 @@ pub use serde_de::{from_path, from_str};
 
 /// A parsed document. `S` is the string type: `String` (owned, from `loads`)
 /// or `Cow<str>` (from `loads_borrowed`, which copies only what it must).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value<S = String> {
     Str(S),
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+    Null,
     Map(Vec<(S, Value<S>)>),
     List(Vec<Value<S>>),
 }
@@ -50,6 +55,41 @@ impl<S: AsRef<str>> Value<S> {
             Value::Str(s) => Some(s.as_ref()),
             _ => None,
         }
+    }
+    pub fn as_i64(&self) -> Option<i64> {
+        match self {
+            Value::Int(i) => Some(*i),
+            _ => None,
+        }
+    }
+    /// A float, or an integer as a float.
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            Value::Float(f) => Some(*f),
+            Value::Int(i) => Some(*i as f64),
+            _ => None,
+        }
+    }
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            Value::Bool(b) => Some(*b),
+            _ => None,
+        }
+    }
+    pub fn is_null(&self) -> bool {
+        matches!(self, Value::Null)
+    }
+}
+
+/// The value of a *plain* scalar's text: `true`, `false`, `null` and JSON
+/// numbers are typed, anything else is the string itself.
+pub fn plain_value(text: &str) -> Value {
+    match reader::typed(text) {
+        Some(Event::Int(i)) => Value::Int(i),
+        Some(Event::Float(f)) => Value::Float(f),
+        Some(Event::Bool(b)) => Value::Bool(b),
+        Some(Event::Null) => Value::Null,
+        _ => Value::Str(text.to_string()),
     }
 }
 
@@ -139,6 +179,10 @@ fn build<'a, S: From<Cow<'a, str>>>(text: &'a str, base: Option<&Path>) -> R<Val
                 continue;
             }
             Event::Scalar(s) => Value::Str(S::from(s)),
+            Event::Int(i) => Value::Int(i),
+            Event::Float(f) => Value::Float(f),
+            Event::Bool(b) => Value::Bool(b),
+            Event::Null => Value::Null,
             Event::MapEnd | Event::ListEnd => stack.pop().unwrap().0,
         };
         match stack.last_mut() {

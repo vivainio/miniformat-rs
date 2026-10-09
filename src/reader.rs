@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 
 const MAX_INCLUDES: usize = 1000;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One step through a document. `Scalar` is a string; a plain `true`, `false`,
+/// `null` or number in JSON syntax arrives as `Bool`, `Null`, `Int` or `Float`.
+#[derive(Debug, Clone, PartialEq)]
 pub enum Event<'a> {
     MapStart,
     MapEnd,
@@ -16,6 +18,72 @@ pub enum Event<'a> {
     ListEnd,
     Key(Cow<'a, str>),
     Scalar(Cow<'a, str>),
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+    Null,
+}
+
+/// A plain scalar that is a JSON literal or number: `true`, `false`, `null`,
+/// or `-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?`. Integers outside
+/// the 64-bit range and floats that overflow are not typed (`None`: strings).
+pub(crate) fn typed(s: &str) -> Option<Event<'static>> {
+    let b = s.as_bytes();
+    match b.first()? {
+        b't' | b'f' | b'n' => {
+            return match s {
+                "true" => Some(Event::Bool(true)),
+                "false" => Some(Event::Bool(false)),
+                "null" => Some(Event::Null),
+                _ => None,
+            }
+        }
+        b'-' | b'0'..=b'9' => {}
+        _ => return None,
+    }
+    match json_number(s)? {
+        false => s.parse().ok().map(Event::Int),
+        true => s.parse::<f64>().ok().filter(|f| f.is_finite()).map(Event::Float),
+    }
+}
+
+/// Is all of `s` a number in JSON syntax? `Some(true)` if it has a fraction or exponent.
+pub(crate) fn json_number(s: &str) -> Option<bool> {
+    let b = s.as_bytes();
+    let digits = |i: &mut usize| {
+        let from = *i;
+        while b.get(*i).is_some_and(u8::is_ascii_digit) {
+            *i += 1;
+        }
+        *i > from
+    };
+    let mut i = (b.first() == Some(&b'-')) as usize;
+    match b.get(i)? {
+        b'0' => i += 1,
+        b'1'..=b'9' => {
+            digits(&mut i);
+        }
+        _ => return None,
+    }
+    let mut float = false;
+    if b.get(i) == Some(&b'.') {
+        i += 1;
+        if !digits(&mut i) {
+            return None;
+        }
+        float = true;
+    }
+    if matches!(b.get(i), Some(b'e' | b'E')) {
+        i += 1;
+        if matches!(b.get(i), Some(b'+' | b'-')) {
+            i += 1;
+        }
+        if !digits(&mut i) {
+            return None;
+        }
+        float = true;
+    }
+    (i == b.len()).then_some(float)
 }
 
 type R<T> = Result<T, Error>;
@@ -219,6 +287,8 @@ enum Piece {
 }
 
 enum Inl {
+    /// A plain `true`, `false`, `null` or number.
+    Typed(Event<'static>),
     /// One line of JSON: its events, the first one included.
     Flow(Vec<Event<'static>>),
     Scalar(Piece),
@@ -1136,6 +1206,7 @@ impl<'a> Reader<'a> {
             return self.value(rs + tl, parent);
         }
         let ev = match self.inline(content, &cur.scan, rs, rs + rest.len(), start)? {
+            Inl::Typed(ev) => ev,
             Inl::Flow(evs) => {
                 let mut evs = VecDeque::from(evs);
                 let first = evs.pop_front().expect("a flow value has events");
@@ -1188,6 +1259,9 @@ impl<'a> Reader<'a> {
             return flow::parse(rest).map(Inl::Flow).map_err(|m| self.err(m));
         }
         let s = cut.rtrim_sptab();
+        if let Some(ev) = typed(s) {
+            return Ok(Inl::Typed(ev)); // (a typed scalar has no colon or bad start)
+        }
         self.check_start(s)?;
         let colon = if content.starts_with('"') {
             // a quoted key may itself hold ': ', so the scan's first two colons don't tell

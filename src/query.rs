@@ -10,9 +10,13 @@ use std::str::FromStr;
 type R<T> = Result<T, Error>;
 
 /// What a path points at.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Found<'a> {
     Scalar(Cow<'a, str>),
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+    Null,
     Map,
     List,
 }
@@ -89,13 +93,19 @@ fn open<'a>(text: &'a str, base: Option<&Path>) -> R<Reader<'a>> {
 pub fn find<'a>(text: &'a str, base: Option<&Path>, path: &[&str]) -> R<Option<Found<'a>>> {
     Ok(open(text, base)?.seek(path)?.map(|ev| match ev {
         Event::Scalar(s) => Found::Scalar(s),
+        Event::Int(i) => Found::Int(i),
+        Event::Float(f) => Found::Float(f),
+        Event::Bool(b) => Found::Bool(b),
+        Event::Null => Found::Null,
         Event::MapStart => Found::Map,
         _ => Found::List,
     }))
 }
 
-/// The scalar at a dotted path like `"db.port"` or `"servers.0.host"`
-/// (`None` if missing or not a scalar). Keys containing dots need `find`.
+/// The scalar at a dotted path like `"db.port"` or `"servers.0.host"`, as
+/// text (`None` if missing or not a scalar; `null` is `"null"`, and a float is
+/// written in its shortest form, so `1.10` is `"1.1"`). Keys containing dots
+/// need `find`.
 pub fn get<'a>(text: &'a str, base: Option<&Path>, path: &str) -> R<Option<Cow<'a, str>>> {
     let segs: Vec<&str> = if path.is_empty() {
         Vec::new()
@@ -104,6 +114,10 @@ pub fn get<'a>(text: &'a str, base: Option<&Path>, path: &str) -> R<Option<Cow<'
     };
     Ok(match find(text, base, &segs)? {
         Some(Found::Scalar(s)) => Some(s),
+        Some(Found::Int(i)) => Some(Cow::Owned(i.to_string())),
+        Some(Found::Float(f)) => Some(Cow::Owned(format!("{f:?}"))),
+        Some(Found::Bool(b)) => Some(Cow::Borrowed(if b { "true" } else { "false" })),
+        Some(Found::Null) => Some(Cow::Borrowed("null")),
         _ => None,
     })
 }

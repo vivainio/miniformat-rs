@@ -106,9 +106,9 @@ pub fn convert(text: &str) -> R<Converted> {
 
 fn count(v: &Value) -> usize {
     match v {
-        Value::Str(_) => 1,
         Value::Map(m) => 1 + m.iter().map(|(_, v)| 1 + count(v)).sum::<usize>(),
         Value::List(l) => 1 + l.iter().map(count).sum::<usize>(),
+        _ => 1,
     }
 }
 
@@ -134,6 +134,11 @@ impl State {
                 }
             }
             Event::Scalar(v, style, aid, tag) => {
+                // only a plain scalar is typed, and `!!str` says it is not
+                let plain = style == ScalarStyle::Plain
+                    && !tag
+                        .as_ref()
+                        .is_some_and(|t| t.is_yaml_core_schema() && t.suffix == "str");
                 if self.expecting_key() {
                     if tag.is_some() {
                         return err(line, "tags on keys are not supported");
@@ -147,7 +152,12 @@ impl State {
                         *key = Some(v.into_owned());
                     }
                 } else {
-                    self.finish(Value::Str(v.into_owned()), aid, tag.map(|t| t.into_owned()), line)?;
+                    let value = if plain {
+                        miniformat::plain_value(&v)
+                    } else {
+                        Value::Str(v.into_owned())
+                    };
+                    self.finish(value, aid, tag.map(|t| t.into_owned()), line)?;
                 }
             }
             Event::Alias(id) => {
@@ -258,7 +268,7 @@ impl State {
             return Ok(Value::Map(vec![(name, value)]));
         }
         if t.is_yaml_core_schema() {
-            // everything is a string here, so `!!str`, `!!int`, ... say nothing
+            // plain scalars are typed by their text here, so `!!int`, ... say nothing
             self.warnings.push(format!("line {line}: dropped tag !!{}", t.suffix));
             return Ok(value);
         }
@@ -282,7 +292,7 @@ fn apply_merges(pairs: &mut Vec<(String, Value)>, merges: Vec<Value>, line: usiz
                     _ => err(line, "a merge key (<<) needs mappings"),
                 })
                 .collect::<R<Vec<_>>>()?,
-            Value::Str(_) => return err(line, "a merge key (<<) needs a mapping or a list of mappings"),
+            _ => return err(line, "a merge key (<<) needs a mapping or a list of mappings"),
         };
         for m in maps {
             for (k, v) in m {

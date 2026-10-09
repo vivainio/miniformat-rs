@@ -1,7 +1,7 @@
 # miniformat-rs
 
 Minimal, fast Rust port of [miniformat](https://github.com/vivainio/miniformat): a strict config
-format with YAML syntax where every scalar is a string, `#+include` splices in files, and
+format with YAML syntax where plain scalars are typed like JSON (`true`, `false`, `null`, numbers; all else is a string), `#+include` splices in files, and
 `key: !Name value` loads as `{"!Name": value}`.
 
 **The format is defined by the Python original**: see its
@@ -10,14 +10,17 @@ and tags. This crate follows it and runs the same fixture suite (`tests/cases`, 
 the original), so the two should agree on every input. If they differ, the Python
 implementation is the reference and this is a bug.
 
-One rule trips people up: **flow syntax is only valid as one line of JSON whose leaves are all
-strings** (plus empty `{}` and `[]`), and never after a tag. `branches: ["main"]` is fine;
-`branches: [ main ]`, `ports: [80]` and `!Join ["a", "b"]` are errors; write them as block lists.
+Two rules trip people up. **Plain scalars are typed like JSON, nothing more**: `port: 80` is an
+integer, `ok: true` a bool, `x: null` null, `ratio: 1.5` a float; `debug: yes`, `code: 010` and
+`1_000` are strings, and so is anything quoted. A bare `1.10` is the float `1.1`, so quote
+versions (`"1.10"`). And **flow syntax is only valid as one line of JSON** (plus empty `{}` and
+`[]`), never after a tag: `branches: ["main"]` and `ports: [80, 81]` are fine; `branches: [ main ]`
+and `!Join ["a", "b"]` are errors; write those as block lists.
 
 Zero runtime dependencies (serde support and the command line are optional features).
 
 ```rust
-// tree of owned strings
+// tree of owned strings, ints, floats, bools and nulls (Value::{Str, Int, Float, Bool, Null, Map, List})
 let cfg = miniformat::load("app.yaml")?;          // or loads(text, Some(base_dir))
 cfg.get("db").and_then(|d| d.get("port"));        // Some(Value::Str("5432"))
 let text = miniformat::dumps(&cfg);               // canonical form
@@ -31,7 +34,7 @@ use miniformat::Event::*;
 for ev in miniformat::Reader::new(&text, None)? {
     match ev? {
         Key(k) => ..,          // Cow<str>: Borrowed unless unescaped / re-indented / included
-        Scalar(s) => ..,
+        Scalar(s) => ..,       // a string; also Int(i64), Float(f64), Bool(bool), Null
         MapStart | MapEnd | ListStart | ListEnd => ..,
     }
 }
@@ -42,7 +45,7 @@ Streaming lookups: no tree, stop at the match (so the rest is never read or vali
 ```rust
 miniformat::get(&text, None, "servers.0.host")?;        // Option<Cow<str>>; dotted path, list indexes are numbers
 miniformat::get_as::<u16>(&text, None, "db.port")?;     // parsed with FromStr
-miniformat::find(&text, None, &["db", "a.b"])?;         // Found::{Scalar, Map, List}; slice form allows dots in keys
+miniformat::find(&text, None, &["db", "a.b"])?;         // Found::{Scalar, Int, Float, Bool, Null, Map, List}; slice form allows dots in keys
 miniformat::keys(&text, None, &["db"])?;                // keys of a map
 miniformat::len(&text, None, &["servers"])?;            // entries of a map or list
 let mut r = miniformat::Reader::new(&text, None)?;
@@ -60,9 +63,9 @@ struct Db { port: u16 }
 let cfg: Config = miniformat::from_str(&text, None)?;   // or from_path("app.yaml")
 ```
 
-Scalars are strings, so numbers and bools are parsed from their text where your type asks
-for them (`port: 5432` into `u16`, `true`/`false` into `bool`); `key:` (empty) is `None` /
-`()`. Enums are a string (`mode: Fast`) or a single-key map (`mode:` / `  Slow:` / `    delay: 5`).
+Typed scalars go to the field that wants them (`port: 5432` into `u16`, `debug: true` into
+`bool`); a quoted `"5432"` is parsed from its text for a number field, and a `String` field needs
+a string (quote `version: "1.10"`). `key:` (empty) and `null` are `None` / `()`. Enums are a string (`mode: Fast`) or a single-key map (`mode:` / `  Slow:` / `    delay: 5`).
 `&str` and `Cow<str>` fields borrow from the input. Unknown fields are skipped.
 
 `Reader::strict_keys(false)` skips duplicate-key detection (on by default).
@@ -74,9 +77,10 @@ Tags (as in the Python original): `key: !Name value` is the one-key map `{"!Name
 (`queue.!Ref`); `dumps` writes such maps back as tags. One tag per value, none on keys or the
 root, no `!!`.
 
-JSON in (`miniformat::from_json(text)`, or the CLI below): every scalar becomes a string, numbers keep
-the text they were written with (`1.10` stays `1.10`), `true`/`false` become `"true"`/`"false"`,
-`null` becomes the empty value. Duplicate keys and a non-object/array root are errors.
+JSON in (`miniformat::from_json(text)`, or the CLI below): types are kept. A number miniformat can't
+type (an integer beyond 64 bits, a float that overflows) becomes a string with its text. Duplicate
+keys and a non-object/array root are errors. `miniformat::plain_value(text)` gives the value of a
+plain scalar's text.
 
 CLI (optional `cli` feature): JSON, canonical text, `--get`, and YAML/JSON to miniformat; see
 [Command line](#command-line).
@@ -110,8 +114,9 @@ invalid, so it fits CI and pre-commit hooks. `-q` prints nothing at all (exit st
 
 ### Converting existing YAML
 
-`--from-yaml` reads real YAML and writes miniformat. Scalars keep the text they were written with
-(`no`, `1.10`, `007`, `~` stay as they are), so nothing is retyped:
+`--from-yaml` reads real YAML and writes miniformat. Plain scalars are typed by miniformat's rules
+(`80`, `true`, `null`, `1.5` are typed; `no`, `007`, `~`, `1_000` stay strings), and quoted ones
+stay strings. Watch for floats: YAML `1.10` becomes the float `1.1`, so quote versions first:
 
 | YAML | miniformat |
 |---|---|
@@ -121,9 +126,9 @@ invalid, so it fits CI and pre-commit hooks. `-q` prints nothing at all (exit st
 | `&base` / `*base` | expanded |
 | `<<: *base` | merged (keys of the map win) |
 | `!Ref x` | kept: `{"!Ref": "x"}` |
-| `!!str 5` | `5`, with a warning (`!!` tags are dropped) |
+| `!!str 5` | the string `"5"`, with a warning (`!!` tags are dropped) |
 
-Flow collections are only valid miniformat as one line of string-only JSON, and not after a tag
+Flow collections are only valid miniformat as one line of JSON, and not after a tag
 (`!Join [a, b]`), so `--from-yaml` always writes block form.
 
 Refused with a line number: multiple documents, duplicate keys, mappings or sequences as keys,

@@ -1,9 +1,9 @@
 //! JSON in: turn a JSON document into a miniformat tree, so any tool that can
 //! write JSON (`yq -o=json`, Python, ...) can feed miniformat.
 //!
-//! Every scalar becomes a string: numbers keep the text they were written with
-//! (`1.10` stays `1.10`), `true`/`false` become `"true"`/`"false"`, and `null`
-//! becomes the empty value.
+//! Types are kept: numbers, `true`, `false` and `null` load as such. A number
+//! miniformat can't type (an integer beyond 64 bits, a float that overflows)
+//! becomes a string with the text it was written with.
 
 use crate::reader::{quoted_len, unquote};
 use crate::{Error, Value};
@@ -178,10 +178,10 @@ impl P<'_> {
                 }
             }
             Some(b'"') => self.string().map(Value::Str),
-            Some(b'-' | b'0'..=b'9') => self.number().map(Value::Str),
-            _ if self.lit("true") => Ok(Value::Str("true".into())),
-            _ if self.lit("false") => Ok(Value::Str("false".into())),
-            _ if self.lit("null") => Ok(Value::Str(String::new())),
+            Some(b'-' | b'0'..=b'9') => self.number().map(|n| crate::plain_value(&n)),
+            _ if self.lit("true") => Ok(Value::Bool(true)),
+            _ if self.lit("false") => Ok(Value::Bool(false)),
+            _ if self.lit("null") => Ok(Value::Null),
             _ => Err(self.err("expected a JSON value")),
         }
     }

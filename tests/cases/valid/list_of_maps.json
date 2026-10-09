@@ -1,10 +1,10 @@
 [
  {
   "name": "a",
-  "port": "1"
+  "port": 1
  },
  {
   "name": "b",
-  "port": "2"
+  "port": 2
  }
 ]

@@ -1,9 +1,11 @@
 //! Optional serde support (`--features serde`): deserialize straight from the
 //! event stream into your types, without building a tree.
 //!
-//! Scalars are strings, so a number or bool field is parsed from its text
-//! (`port: 5432` into a `u16`; `true`/`false` into a `bool`). An empty value
-//! (`key:`) is `None` for an `Option` and `()` for the unit type.
+//! A plain `5432`, `1.5`, `true` or `null` arrives typed, so `port: 5432`
+//! deserializes into a `u16` and `debug: true` into a `bool`; a quoted `"5432"`
+//! into a number field is parsed from its text. A string field needs a string
+//! (`version: "1.10"`, quoted). `null` and an empty value (`key:`) are `None`
+//! for an `Option` and `()` for the unit type.
 
 use crate::{Error, Event, Reader};
 use serde::de::{self, DeserializeOwned, DeserializeSeed, EnumAccess, MapAccess, SeqAccess, VariantAccess, Visitor};
@@ -175,12 +177,15 @@ impl<'de> de::Deserializer<'de> for Scalar<'de> {
     }
 }
 
-macro_rules! typed_scalar {
+/// Number fields take a typed number, or a string that parses as one.
+macro_rules! typed_number {
     ($($method:ident),* $(,)?) => {$(
         fn $method<V: Visitor<'de>>(self, v: V) -> R<V::Value> {
             match self.next()? {
+                Event::Int(i) => v.visit_i64(i),
+                Event::Float(f) => v.visit_f64(f),
                 Event::Scalar(s) => Scalar(s).$method(v),
-                _ => Err(de::Error::custom(concat!("expected a scalar for ", stringify!($method)))),
+                _ => Err(de::Error::custom(concat!("expected a number for ", stringify!($method)))),
             }
         }
     )*};
@@ -192,6 +197,10 @@ impl<'de> de::Deserializer<'de> for &mut De<'de> {
     fn deserialize_any<V: Visitor<'de>>(self, v: V) -> R<V::Value> {
         match self.next()? {
             Event::Scalar(s) => Scalar(s).deserialize_any(v),
+            Event::Int(i) => v.visit_i64(i),
+            Event::Float(f) => v.visit_f64(f),
+            Event::Bool(b) => v.visit_bool(b),
+            Event::Null => v.visit_unit(),
             Event::MapStart => {
                 let mut acc = Entries { de: self, done: false };
                 let out = v.visit_map(&mut acc)?;
@@ -208,15 +217,37 @@ impl<'de> de::Deserializer<'de> for &mut De<'de> {
         }
     }
 
-    typed_scalar! {
-        deserialize_bool, deserialize_char,
+    typed_number! {
         deserialize_i8, deserialize_i16, deserialize_i32, deserialize_i64, deserialize_i128,
         deserialize_u8, deserialize_u16, deserialize_u32, deserialize_u64, deserialize_u128,
-        deserialize_f32, deserialize_f64, deserialize_unit,
+        deserialize_f32, deserialize_f64,
+    }
+
+    fn deserialize_bool<V: Visitor<'de>>(self, v: V) -> R<V::Value> {
+        match self.next()? {
+            Event::Bool(b) => v.visit_bool(b),
+            Event::Scalar(s) => Scalar(s).deserialize_bool(v),
+            _ => Err(de::Error::custom("expected a bool")),
+        }
+    }
+
+    fn deserialize_char<V: Visitor<'de>>(self, v: V) -> R<V::Value> {
+        match self.next()? {
+            Event::Scalar(s) => Scalar(s).deserialize_char(v),
+            _ => Err(de::Error::custom("expected a one-character string")),
+        }
+    }
+
+    fn deserialize_unit<V: Visitor<'de>>(self, v: V) -> R<V::Value> {
+        match self.next()? {
+            Event::Null => v.visit_unit(),
+            Event::Scalar(s) => Scalar(s).deserialize_unit(v),
+            _ => Err(de::Error::custom("expected null or an empty value")),
+        }
     }
 
     fn deserialize_option<V: Visitor<'de>>(self, v: V) -> R<V::Value> {
-        if matches!(self.peek()?, Event::Scalar(s) if s.is_empty()) {
+        if matches!(self.peek()?, Event::Null) || matches!(self.peek()?, Event::Scalar(s) if s.is_empty()) {
             self.next()?;
             v.visit_none()
         } else {

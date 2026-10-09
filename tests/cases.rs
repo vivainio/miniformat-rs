@@ -61,6 +61,10 @@ fn events(text: &str) -> Vec<String> {
             miniformat::Event::ListEnd => "]".into(),
             miniformat::Event::Key(k) => format!("{k}:"),
             miniformat::Event::Scalar(s) => format!("={s:?}"),
+            miniformat::Event::Int(i) => format!("#{i}"),
+            miniformat::Event::Float(f) => format!("#{f:?}"),
+            miniformat::Event::Bool(b) => format!("#{b}"),
+            miniformat::Event::Null => "#null".into(),
         })
         .collect()
 }
@@ -70,7 +74,7 @@ fn reader_events() {
     let ev = events("a: x\nb:\n  - 1\n  - k: v\n    w: \"q\\n\"\nc: |\n  t\ne: {}\nf:\n");
     assert_eq!(
         ev.join(" "),
-        r#"{ a: ="x" b: [ ="1" { k: ="v" w: ="q\n" } ] c: ="t\n" e: { } f: ="" }"#
+        r#"{ a: ="x" b: [ #1 { k: ="v" w: ="q\n" } ] c: ="t\n" e: { } f: ="" }"#
     );
 }
 
@@ -123,7 +127,7 @@ fn includes_through_reader() {
     let v = loads(text, Some(&dir)).unwrap();
     assert_eq!(
         to_json(&v).replace([' ', '\n'], ""),
-        r#"{"db":{"host":"h","note":"a\n"},"l":{"x":"1","y":"2"},"z":"1"}"#
+        r#"{"db":{"host":"h","note":"a\n"},"l":{"x":1,"y":2},"z":1}"#
     );
     let e = loads("a:\n  #+include conf.d/2.yaml\n  y: 3\n", Some(&dir)).unwrap_err();
     assert!(
@@ -234,7 +238,13 @@ fn from_json_scalars_and_errors() {
     .unwrap();
     assert_eq!(
         to_json(&v).replace([' ', '\n'], ""),
-        r#"{"n":"1.10","e":"-2E+3","t":"true","f":"false","z":"","s":"aé\n","l":[],"o":{}}"#
+        r#"{"n":1.1,"e":-2000.0,"t":true,"f":false,"z":null,"s":"aé\n","l":[],"o":{}}"#
+    );
+    // a number miniformat can't type keeps its text
+    let big = miniformat::from_json("[12345678901234567890, 1e999]").unwrap();
+    assert_eq!(
+        to_json(&big).replace([' ', '\n'], ""),
+        r#"["12345678901234567890","1e999"]"#
     );
     for (bad, needle) in [
         ("1", "root"),

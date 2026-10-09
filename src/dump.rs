@@ -1,6 +1,6 @@
 //! Canonical writer and JSON output.
 
-use crate::reader::tag_len;
+use crate::reader::{tag_len, typed};
 use crate::{bad_char, Value};
 use std::fmt::Write;
 
@@ -47,7 +47,7 @@ fn plain_ok(s: &str) -> bool {
     if b"-?:".contains(&c) && b.get(1).is_none_or(|&n| n == b' ' || n == b'\t') {
         return false;
     }
-    !has_colon(s) && !s.contains(" #") && s != "{}" && s != "[]"
+    !has_colon(s) && !s.contains(" #") && s != "{}" && s != "[]" && typed(s).is_none()
 }
 
 fn block_ok(s: &str) -> bool {
@@ -77,6 +77,17 @@ fn scalar(s: &str, out: &mut String) {
     } else {
         quote(s, out);
     }
+}
+
+/// A typed scalar as it is written in miniformat and in JSON.
+fn typed_text<S>(out: &mut String, v: &Value<S>) {
+    let _ = match v {
+        Value::Int(i) => write!(out, "{i}"),
+        Value::Float(f) if f.is_finite() => write!(out, "{f:?}"),
+        Value::Float(f) => panic!("cannot write {f} (only finite floats)"),
+        Value::Bool(b) => write!(out, "{b}"),
+        _ => write!(out, "null"),
+    };
 }
 
 fn pad(out: &mut String, n: usize) {
@@ -121,6 +132,11 @@ fn value_in<S: AsRef<str>>(out: &mut String, ind: usize, v: &Value<S>, tagged: b
         Value::Str(s) => {
             out.push(' ');
             scalar(s.as_ref(), out);
+            out.push('\n');
+        }
+        Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Null => {
+            out.push(' ');
+            typed_text(out, v);
             out.push('\n');
         }
         Value::Map(m) if m.is_empty() => out.push_str(" {}\n"),
@@ -172,7 +188,7 @@ pub fn dumps<S: AsRef<str>>(v: &Value<S>) -> String {
         Value::List(l) if l.is_empty() => out.push_str("[]\n"),
         Value::Map(m) => map(&mut out, 0, m, false),
         Value::List(l) => list(&mut out, 0, l),
-        Value::Str(_) => panic!("document root must be a map or a list"),
+        _ => panic!("document root must be a map or a list"),
     }
     out
 }
@@ -207,6 +223,7 @@ fn json_str(out: &mut String, s: &str) {
 fn json<S: AsRef<str>>(out: &mut String, ind: usize, v: &Value<S>) {
     match v {
         Value::Str(s) => json_str(out, s.as_ref()),
+        Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Null => typed_text(out, v),
         Value::Map(m) if m.is_empty() => out.push_str("{}"),
         Value::List(l) if l.is_empty() => out.push_str("[]"),
         Value::Map(m) => {

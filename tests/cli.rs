@@ -59,9 +59,9 @@ fn yaml_to_stdout_keeps_text_and_reads_back() {
     let v = miniformat::loads(&text, None).unwrap();
     let got: serde_json::Value = serde_json::from_str(&miniformat::to_json(&v)).unwrap();
     let want: serde_json::Value = serde_json::from_str(concat!(
-        r#"{"plain":"hello","escaped":"it's","colon":"a: b","typed":"yes","num":"007","nulls":["~","null"],"#,
-        r#""flow":{"x":"1","y":["a","b"]},"base":{"host":"h","port":"1"},"#,
-        r#""derived":{"port":"2","host":"h"},"copy":{"host":"h","port":"1"},"#,
+        r#"{"plain":"hello","escaped":"it's","colon":"a: b","typed":"yes","num":"007","nulls":["~",null],"#,
+        r#""flow":{"x":1,"y":["a","b"]},"base":{"host":"h","port":1},"#,
+        r#""derived":{"port":2,"host":"h"},"copy":{"host":"h","port":1},"#,
         r#""text":"folded text\n","queue":{"!Ref":"MyQueue"}}"#
     ))
     .unwrap();
@@ -160,7 +160,7 @@ fn json_and_usage() {
         .write_all(br#"{"a": 1.10, "b": [true, null]}"#)
         .unwrap();
     let out = child.wait_with_output().unwrap();
-    assert_eq!(stdout(&out), "a: 1.10\nb:\n  - true\n  - \"\"\n");
+    assert_eq!(stdout(&out), "a: 1.1\nb:\n  - true\n  - null\n");
     assert_eq!(bin().arg("-i").output().unwrap().status.code(), Some(2)); // -i needs --from-yaml
     assert_eq!(bin().output().unwrap().status.code(), Some(2));
 }

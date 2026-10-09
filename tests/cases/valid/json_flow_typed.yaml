@@ -1,0 +1,2 @@
+a: [1, true, false, null, -2.5, 1e2]
+b: {"n": 1, "s": "1", "deep": [{"x": null}]}
