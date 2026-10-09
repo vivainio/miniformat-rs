@@ -17,6 +17,10 @@ versions (`"1.10"`). And **flow syntax is only valid as one line of JSON** (plus
 `[]`), never after a tag: `branches: ["main"]` and `ports: [80, 81]` are fine; `branches: [ main ]`
 and `!Join ["a", "b"]` are errors; write those as block lists.
 
+How the format differs from YAML (narrower typing: `yes`, `~`, `010` stay strings; `key:` is `""`;
+keys are always strings; tags are data; a strict syntax subset) is listed in the original's
+[README](https://github.com/vivainio/miniformat#how-it-differs-from-yaml).
+
 Zero runtime dependencies (serde support and the command line are optional features).
 
 ```rust
